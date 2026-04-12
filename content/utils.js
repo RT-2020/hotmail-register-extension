@@ -1,0 +1,263 @@
+const SCRIPT_SOURCE = (() => {
+  if (window.__HOTMAIL_REGISTER_SOURCE) return window.__HOTMAIL_REGISTER_SOURCE;
+  const url = location.href;
+  if (url.includes('auth0.openai.com') || url.includes('auth.openai.com') || url.includes('accounts.openai.com')) return 'signup-page';
+  return 'vps-panel';
+})();
+
+const LOG_PREFIX = `[HotmailRegister:${SCRIPT_SOURCE}]`;
+const STOP_ERROR_MESSAGE = '流程已被用户停止。';
+let flowStopped = false;
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'STOP_FLOW') {
+    flowStopped = true;
+    console.warn(LOG_PREFIX, STOP_ERROR_MESSAGE);
+  }
+});
+
+function resetStopState() {
+  flowStopped = false;
+}
+
+function isStopError(error) {
+  const message = typeof error === 'string' ? error : error?.message;
+  return message === STOP_ERROR_MESSAGE;
+}
+
+function throwIfStopped() {
+  if (flowStopped) {
+    throw new Error(STOP_ERROR_MESSAGE);
+  }
+}
+
+function log(message, level = 'info') {
+  chrome.runtime.sendMessage({
+    type: 'LOG',
+    source: SCRIPT_SOURCE,
+    payload: { message, level, timestamp: Date.now() },
+  }).catch(() => {});
+}
+
+function reportReady() {
+  chrome.runtime.sendMessage({
+    type: 'CONTENT_SCRIPT_READY',
+    source: SCRIPT_SOURCE,
+    payload: {},
+  }).catch(() => {});
+}
+
+function reportComplete(step, data = {}) {
+  log(`步骤 ${step} 已成功完成`, 'ok');
+  chrome.runtime.sendMessage({
+    type: 'STEP_COMPLETE',
+    source: SCRIPT_SOURCE,
+    step,
+    payload: data,
+  }).catch(() => {});
+}
+
+function reportError(step, errorMessage) {
+  log(`步骤 ${step} 失败：${errorMessage}`, 'error');
+  chrome.runtime.sendMessage({
+    type: 'STEP_ERROR',
+    source: SCRIPT_SOURCE,
+    step,
+    error: errorMessage,
+    payload: {},
+  }).catch(() => {});
+}
+
+function isVisible(element) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+}
+
+function waitForElement(selector, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    throwIfStopped();
+
+    const existing = document.querySelector(selector);
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    let settled = false;
+    let stopTimer = null;
+    const cleanup = (observer, timer) => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      clearTimeout(stopTimer);
+    };
+
+    const observer = new MutationObserver(() => {
+      if (flowStopped) {
+        cleanup(observer, timer);
+        reject(new Error(STOP_ERROR_MESSAGE));
+        return;
+      }
+
+      const element = document.querySelector(selector);
+      if (element) {
+        cleanup(observer, timer);
+        resolve(element);
+      }
+    });
+
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    const timer = setTimeout(() => {
+      cleanup(observer, timer);
+      reject(new Error(`在 ${location.href} 等待 ${selector} 超时，已超过 ${timeout}ms`));
+    }, timeout);
+
+    const pollStop = () => {
+      if (settled) return;
+      if (flowStopped) {
+        cleanup(observer, timer);
+        reject(new Error(STOP_ERROR_MESSAGE));
+        return;
+      }
+      stopTimer = setTimeout(pollStop, 100);
+    };
+    pollStop();
+  });
+}
+
+function waitForElementByText(containerSelector, textPattern, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    throwIfStopped();
+
+    function search() {
+      const candidates = document.querySelectorAll(containerSelector);
+      for (const element of candidates) {
+        if (textPattern.test(element.textContent || '')) {
+          return element;
+        }
+      }
+      return null;
+    }
+
+    const existing = search();
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    let settled = false;
+    let stopTimer = null;
+    const cleanup = (observer, timer) => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      clearTimeout(stopTimer);
+    };
+
+    const observer = new MutationObserver(() => {
+      if (flowStopped) {
+        cleanup(observer, timer);
+        reject(new Error(STOP_ERROR_MESSAGE));
+        return;
+      }
+
+      const element = search();
+      if (element) {
+        cleanup(observer, timer);
+        resolve(element);
+      }
+    });
+
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    const timer = setTimeout(() => {
+      cleanup(observer, timer);
+      reject(new Error(`在 ${location.href} 的 ${containerSelector} 中等待文本 "${textPattern}" 超时，已超过 ${timeout}ms`));
+    }, timeout);
+
+    const pollStop = () => {
+      if (settled) return;
+      if (flowStopped) {
+        cleanup(observer, timer);
+        reject(new Error(STOP_ERROR_MESSAGE));
+        return;
+      }
+      stopTimer = setTimeout(pollStop, 100);
+    };
+    pollStop();
+  });
+}
+
+function fillInput(element, value) {
+  throwIfStopped();
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value'
+  ).set;
+  nativeInputValueSetter.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function fillSelect(element, value) {
+  throwIfStopped();
+  element.value = value;
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function simulateClick(element) {
+  throwIfStopped();
+  element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+}
+
+function sleep(ms) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    function tick() {
+      if (flowStopped) {
+        reject(new Error(STOP_ERROR_MESSAGE));
+        return;
+      }
+      if (Date.now() - startedAt >= ms) {
+        resolve();
+        return;
+      }
+      setTimeout(tick, Math.min(100, Math.max(25, ms - (Date.now() - startedAt))));
+    }
+
+    tick();
+  });
+}
+
+async function humanPause(min = 250, max = 850) {
+  const duration = Math.floor(Math.random() * (max - min + 1)) + min;
+  await sleep(duration);
+}
+
+globalThis.HotmailRegisterUtils = {
+  clickElement: simulateClick,
+  fillInput,
+  fillSelect,
+  humanPause,
+  isStopError,
+  isVisible,
+  log,
+  reportComplete,
+  reportError,
+  reportReady,
+  resetStopState,
+  setInputValue: fillInput,
+  simulateClick,
+  sleep,
+  throwIfStopped,
+  waitForElement,
+  waitForElementByText,
+};
+
+reportReady();
