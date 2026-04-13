@@ -210,9 +210,59 @@ function fillSelect(element, value) {
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+function resolveNavigationHref(element) {
+  const anchor = element?.closest?.('a[href]') || (element?.matches?.('a[href]') ? element : null);
+  const href = anchor?.getAttribute?.('href') || '';
+  if (!href || href.startsWith('#') || /^javascript:/i.test(href)) {
+    return '';
+  }
+
+  try {
+    return new URL(href, location.href).toString();
+  } catch {
+    return '';
+  }
+}
+
 function simulateClick(element) {
   throwIfStopped();
-  element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  if (!element) return;
+
+  const beforeHref = location.href;
+  const navigationHref = resolveNavigationHref(element);
+
+  try {
+    element.focus?.({ preventScroll: true });
+  } catch {}
+
+  const mouseEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup'];
+  for (const type of mouseEvents) {
+    try {
+      element.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }));
+    } catch {}
+  }
+
+  try {
+    if (typeof element.click === 'function') {
+      element.click();
+    } else {
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }
+  } catch {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }
+
+  if (navigationHref && location.href === beforeHref) {
+    setTimeout(() => {
+      if (!flowStopped && location.href === beforeHref) {
+        location.assign(navigationHref);
+      }
+    }, 150);
+  }
 }
 
 function sleep(ms) {
