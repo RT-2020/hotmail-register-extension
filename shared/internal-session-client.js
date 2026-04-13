@@ -10,6 +10,11 @@ async function parseJsonResponse(response) {
   return payload;
 }
 
+function buildFetchFailureMessage(url, error) {
+  const reason = error?.message || String(error);
+  return `无法连接内部接口：${url}。请确认 API URL 可访问、服务已启动，且浏览器当前登录态与证书状态正常。原始错误：${reason}`;
+}
+
 export function createInternalSessionClient({
   baseUrl,
   fetchImpl = fetch,
@@ -19,16 +24,22 @@ export function createInternalSessionClient({
   }
 
   async function request(pathname, options = {}) {
-    const response = await fetchImpl(buildUrl(baseUrl, pathname), {
-      method: options.method || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.csrfToken ? { 'X-CSRF-Token': options.csrfToken } : {}),
-        ...(options.headers || {}),
-      },
-      credentials: 'include',
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    const url = buildUrl(baseUrl, pathname);
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.csrfToken ? { 'X-CSRF-Token': options.csrfToken } : {}),
+          ...(options.headers || {}),
+        },
+        credentials: 'include',
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+    } catch (error) {
+      throw new Error(buildFetchFailureMessage(url, error));
+    }
     return parseJsonResponse(response);
   }
 

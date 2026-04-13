@@ -764,6 +764,7 @@ const handlers = {
   },
   async PREPARE_NEXT_ACCOUNT() {
     const state = await getState();
+    await addLog('准备账号：正在从邮箱平台拉取可用账号...', 'info');
     const accounts = await buildClient(state).listAccounts();
     const selection = resolveCurrentAccountSelection({
       accounts,

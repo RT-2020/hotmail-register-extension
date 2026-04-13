@@ -17,6 +17,11 @@ async function parseJsonResponse(response) {
   return payload;
 }
 
+function buildFetchFailureMessage(url, error) {
+  const reason = error?.message || String(error);
+  return `无法连接邮箱平台接口：${url}。请确认 API URL 可访问、服务已启动，且当前证书/网络未拦截请求。原始错误：${reason}`;
+}
+
 function normalizeAccount(account = {}) {
   return {
     id: account.id || 0,
@@ -62,15 +67,21 @@ export function createLuckmailClient({
   }
 
   async function request(pathname, query, options = {}) {
-    const response = await fetchImpl(buildUrl(baseUrl, pathname, query), {
-      method: options.method || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-        ...(options.headers || {}),
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    const url = buildUrl(baseUrl, pathname, query);
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          ...(options.headers || {}),
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+    } catch (error) {
+      throw new Error(buildFetchFailureMessage(url, error));
+    }
     return parseJsonResponse(response);
   }
 

@@ -105,6 +105,21 @@ test('createLuckmailClient throws a readable error when external API responds wi
   );
 });
 
+test('createLuckmailClient exposes the request url when fetch fails', async () => {
+  const client = createLuckmailClient({
+    apiKey: 'test-key',
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  });
+
+  await assert.rejects(
+    () => client.listAccounts(),
+    /无法连接邮箱平台接口：http:\/\/localhost:5000\/api\/external\/accounts/
+  );
+});
+
 test('findFirstUnregisteredAccount returns the first account without 已注册 tag', async () => {
   const client = createLuckmailClient({
     apiKey: 'test-key',

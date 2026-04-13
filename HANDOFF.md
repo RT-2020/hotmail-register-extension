@@ -1,5 +1,70 @@
 # HANDOFF
 
+## 2026-04-13 `Failed to fetch` 日志诊断补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户真实联调中，点击 `重新开始` 或自动流程重启后，日志经常只出现：
+    - `自动流程 执行失败：Failed to fetch`
+  - 没有步骤号、没有接口 URL，无法判断是邮箱平台、内部接口还是别的请求失败
+
+### 本次确认的判断
+
+- 从自动流程执行顺序看：
+  - `runSingleAutoFlow()` 进入后首先执行 `prepareNextAccount`
+  - 它会调用邮箱平台 `listAccounts()`
+- 如果这一步底层 `fetch` 失败：
+  - 还没进入 Step 1
+  - `findProblemStep()` 会拿不到失败步骤
+  - 最终只会落成泛化日志：
+    - `自动流程 执行失败：Failed to fetch`
+
+- 也就是说：
+  - 这类日志大概率不是 OAuth 页面步骤失败
+  - 而是自动流程最开始的网络请求失败，优先怀疑：
+    - `API URL` 不可达
+    - 服务未启动
+    - 证书 / 本地代理 / 网络拦截
+
+### 本次修复
+
+- `shared/luckmail-client.js`
+  - 为外部邮箱平台请求增加网络错误包装
+  - 底层 `fetch` 失败时，现在会抛出：
+    - 具体请求 URL
+    - “请确认 API URL 可访问、服务已启动、证书/网络未拦截” 的提示
+
+- `shared/internal-session-client.js`
+  - 为内部接口请求增加同类网络错误包装
+  - 底层 `fetch` 失败时，也会带出具体 URL
+
+- `background.js`
+  - `PREPARE_NEXT_ACCOUNT()` 现在会先记一条日志：
+    - `准备账号：正在从邮箱平台拉取可用账号...`
+  - 这样即使还没进入 Step 1，用户也能看出失败发生在“取账号”阶段
+
+### 本次修改的关键文件
+
+- `shared/luckmail-client.js`
+- `shared/internal-session-client.js`
+- `background.js`
+- `tests/luckmail-client.test.js`
+- `tests/internal-session-client.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/luckmail-client.test.js tests/internal-session-client.test.js
+npm test
+find . -name '*.js' -not -path './.git/*' -print0 | xargs -0 -n1 node --check
+```
+
+结果：
+
+- 新增网络错误提示测试通过
+- 全量 `106/106` 通过
+- JS 语法检查通过
+
 ## 2026-04-13 “下一个账号”仍复用旧账号补充（以下内容补充最新状态）
 
 - 补充时间：2026-04-13

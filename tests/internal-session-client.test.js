@@ -87,3 +87,17 @@ test('getEmailDetail fetches internal email detail with encoded path params', as
     },
   ]);
 });
+
+test('createInternalSessionClient exposes the request url when fetch fails', async () => {
+  const client = createInternalSessionClient({
+    baseUrl: 'http://localhost:5000',
+    fetchImpl: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  });
+
+  await assert.rejects(
+    () => client.getCsrfToken(),
+    /无法连接内部接口：http:\/\/localhost:5000\/api\/csrf-token/
+  );
+});

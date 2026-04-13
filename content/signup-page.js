@@ -231,7 +231,7 @@ function isSignupLandingPageReady() {
   const headingCandidates = Array.from(document.querySelectorAll('h1, h2, [role="heading"]'))
     .filter(isVisibleElement)
     .map(getActionText);
-  const hasCreateAccountHeading = headingCandidates.some((text) => /create\s+an\s+account/i.test(text));
+  const hasCreateAccountHeading = headingCandidates.some((text) => /create\s+an\s+account|创建(?:帐户|账户|账号)/i.test(text));
   const emailInput = helpers.getEmailInput();
 
   return Boolean(emailInput && isVisibleElement(emailInput))
@@ -252,7 +252,7 @@ function isSignupIdentifierPageReady() {
   const headingCandidates = Array.from(document.querySelectorAll('h1, h2, [role="heading"]'))
     .filter(isVisibleElement)
     .map(getActionText);
-  const hasSignupHeading = headingCandidates.some((text) => /create\s+an\s+account|sign\s*up/i.test(text));
+  const hasSignupHeading = headingCandidates.some((text) => /create\s+an\s+account|sign\s*up|创建(?:帐户|账户|账号)|注册/i.test(text));
 
   return Boolean(
     helpers.isSignupFlowUrl?.(location.href)

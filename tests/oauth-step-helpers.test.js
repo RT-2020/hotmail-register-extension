@@ -72,12 +72,14 @@ test('isProfileSetupPageText matches age and birthday profile screens', () => {
 
 test('isSignupLandingPageText matches create-account landing screens', () => {
   assert.equal(isSignupLandingPageText('Create an account Continue with Google Continue with Apple Already have an account? Log in'), true);
+  assert.equal(isSignupLandingPageText('创建帐户 电子邮件地址 已经有帐户了？请登录 继续使用 Google 登录 继续使用 Apple 登录 继续使用 Microsoft 登录'), true);
   assert.equal(isSignupLandingPageText('Create your password to continue'), false);
   assert.equal(isSignupLandingPageText('Enter your password Forgot password'), false);
 });
 
 test('isExplicitSignupFlowPageText only matches real signup flow pages', () => {
   assert.equal(isExplicitSignupFlowPageText('Create an account Continue with Google Already have an account? Log in'), true);
+  assert.equal(isExplicitSignupFlowPageText('创建帐户 电子邮件地址 已经有帐户了？请登录 继续使用 Google 登录'), true);
   assert.equal(isExplicitSignupFlowPageText('Create your password to continue'), true);
   assert.equal(isExplicitSignupFlowPageText('First name Last name Age'), true);
   assert.equal(isExplicitSignupFlowPageText('Enter your password Log in with a one-time code'), false);
