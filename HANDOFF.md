@@ -1,5 +1,75 @@
 # HANDOFF
 
+## 2026-04-13 create-account 注册密码页误判为登录页补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户真实联调中，Step 3 在 URL 仍是：
+    - `https://auth.openai.com/create-account`
+  - 且页面实际还在注册密码页时
+  - 报错：
+    - `当前进入了登录页，不是注册密码页`
+
+### 本次确认的根因
+
+- 旧逻辑把：
+  - `Enter your password`
+  - `Forgot password`
+  - `Log in with a one-time code`
+  - 这类文案直接当作“登录密码页”强信号
+- 但 OpenAI 当前的 `create-account` 注册流中，注册密码页也可能出现与登录页高度重叠的密码输入文案
+- 结果：
+  - `content/signup-page.js -> isSignupPasswordCreationPageReady()`
+  - 会因为 `isLoginPasswordPageText(pageText)` 命中而返回 `false`
+  - `finishStep3OnPasswordPage()` 随后就误报“进入了登录页”
+
+### 本次修复
+
+- `shared/oauth-step-helpers-core.js`
+  - 新增：
+    - `shouldTreatPasswordPageAsSignup({ url, text, hasPasswordInput })`
+  - 规则：
+    - 只要当前仍是 `signup / create-account` 路径
+    - 且页面存在可见密码框
+    - 就优先按“注册密码页”处理
+
+- `shared/oauth-step-helpers-runtime.js`
+  - 同步新增同名 runtime helper，供 content script 使用
+
+- `content/signup-page.js`
+  - `isSignupPasswordCreationPageReady()` 改为走 `shouldTreatPasswordPageAsSignup(...)`
+  - `isLoginFlowPageReady()` 也同步避开“注册路径下的密码页”
+  - 这样不会再因为文案重叠，把 `create-account` 下的密码页误伤成登录页
+
+### 修复后的行为
+
+- 如果当前 URL 仍是注册流：
+  - 例如 `https://auth.openai.com/create-account`
+  - 且有可见密码输入框
+  - 即使文案出现 `Enter your password`
+  - 也会继续按注册密码页处理
+
+### 本次修改的关键文件
+
+- `shared/oauth-step-helpers-core.js`
+- `shared/oauth-step-helpers-runtime.js`
+- `content/signup-page.js`
+- `tests/oauth-step-helpers.test.js`
+
+### fresh 验证证据
+
+```bash
+node --test tests/oauth-step-helpers.test.js
+node --test tests/auto-flow.test.js tests/continue-auto-flow.test.js
+node --check content/signup-page.js shared/oauth-step-helpers-core.js shared/oauth-step-helpers-runtime.js
+```
+
+结果：
+
+- 新增的“create-account 路径密码页仍按 signup 处理”测试通过
+- 自动流程与继续流程回归测试通过
+- 相关文件语法检查通过
+
 ## 2026-04-13 成功后认证页未自动关闭补充（以下内容补充最新状态）
 
 - 补充时间：2026-04-13
