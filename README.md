@@ -1,6 +1,6 @@
 # Hotmail Register Luckmail V2
 
-独立的 Chrome MV3 扩展仓库，用于自动执行 OpenAI OAuth 注册 / 登录流程，并通过 Outlook 邮箱平台 API 获取可用邮箱、轮询验证码、在成功后自动打 `已注册` 标签。
+独立的 Chrome MV3 扩展仓库，用于自动执行 OpenAI OAuth 注册 / 登录流程，并通过 Outlook 邮箱平台 API 获取可用邮箱、轮询验证码、在成功后自动打 “已注册” 标签。
 
 ## 核心亮点
 
