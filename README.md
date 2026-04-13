@@ -190,6 +190,7 @@ hotmail-register-extension/
 npm test
 ```
 
+
 当前测试覆盖：
 
 - 自动流程编排
