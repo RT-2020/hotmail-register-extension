@@ -391,21 +391,25 @@ async function detectExistingAccountLoginFlow(payload, timeout = 8000) {
   return null;
 }
 
-async function recoverSignupFlowFromLoginPage(timeout = 8000) {
+async function recoverSignupFlowFromLoginPage(timeout = 22000) {
   if (helpers.isDefinitiveSignupUrl?.(location.href)) {
-    return isSignupIdentifierPageReady() || isSignupPasswordCreationPageReady();
+    return (isSignupIdentifierPageReady() || isSignupPasswordCreationPageReady()) ? 'recovered' : 'waiting';
   }
   if (!helpers.isLoginFlowUrl?.(location.href) && !helpers.isLoginPasswordPageText(getPageTextSnapshot())) {
-    return false;
+    return 'waiting';
   }
 
   const startedAt = Date.now();
   let clickAttempts = 0;
+  let loginFlowSeenAt = 0;
+  let graceLogged = false;
 
   while (Date.now() - startedAt < timeout) {
     if (isSignupIdentifierPageReady() || isSignupPasswordCreationPageReady()) {
-      return true;
+      return 'recovered';
     }
+
+    const pageText = getPageTextSnapshot();
 
     const signupAction = Array.from(document.querySelectorAll(
       'a[href*="signup"], a[href*="register"], button, a, [role="button"], [role="link"]'
@@ -415,16 +419,45 @@ async function recoverSignupFlowFromLoginPage(timeout = 8000) {
       return helpers.isSignupActionText(getActionText(element));
     }) || null;
 
-    if (signupAction && clickAttempts < 2) {
-      clickAttempts += 1;
-      utils.log(`步骤 3：当前停留在登录页，正在重新点击注册入口（第 ${clickAttempts} 次）...`, 'warn');
-      utils.clickElement(signupAction);
+    const hasLoginSignals = Boolean(
+      helpers.isLoginFlowUrl?.(location.href)
+      || helpers.isLoginPasswordPageText(pageText)
+      || signupAction
+    );
+    if (hasLoginSignals && !loginFlowSeenAt) {
+      loginFlowSeenAt = Date.now();
+    }
+    if (hasLoginSignals && !graceLogged) {
+      graceLogged = true;
+      utils.log('步骤 3：检测到登录页迹象，先等待页面继续跳转，不立即重试注册入口...', 'warn');
+    }
+
+    if (helpers.shouldSwitchToLoginFlowAfterGrace?.({
+      url: location.href,
+      text: pageText,
+      hasLoginAction: Boolean(signupAction),
+      loginFlowSeenAt,
+      now: Date.now(),
+    })) {
+      utils.log('步骤 3：宽限后仍稳定停留在登录密码页，按已有账号切换到登录流程。', 'warn');
+      return 'switch_to_login';
     }
 
     await utils.sleep(1200);
   }
 
-  return isSignupIdentifierPageReady() || isSignupPasswordCreationPageReady();
+  if (helpers.shouldSwitchToLoginFlowAfterGrace?.({
+    url: location.href,
+    text: getPageTextSnapshot(),
+    hasLoginAction: Boolean(findLoginAction()),
+    loginFlowSeenAt: loginFlowSeenAt || startedAt,
+    now: Date.now(),
+  })) {
+    utils.log('步骤 3：超时前仍稳定停留在登录密码页，按已有账号切换到登录流程。', 'warn');
+    return 'switch_to_login';
+  }
+
+  return (isSignupIdentifierPageReady() || isSignupPasswordCreationPageReady()) ? 'recovered' : 'waiting';
 }
 
 function isExplicitVisibleSignupFlowPageReady() {
@@ -537,7 +570,11 @@ async function step2OpenSignup() {
 async function finishStep3OnPasswordPage(payload) {
   const passwordInput = await utils.waitForElement('input[type="password"], input[name="password"]', 15000);
   if (!isSignupPasswordCreationPageReady()) {
-    if (await recoverSignupFlowFromLoginPage()) {
+    const recoverResult = await recoverSignupFlowFromLoginPage();
+    if (recoverResult === 'switch_to_login') {
+      return switchStep3ToLoginFlow(payload, 'grace_timeout');
+    }
+    if (recoverResult === 'recovered') {
       if (isSignupIdentifierPageReady() && !isSignupPasswordCreationPageReady()) {
         utils.log('步骤 3：已从登录页切回注册入口页，准备重新填写邮箱...', 'warn');
         return step3FillCredentials(payload);
@@ -647,7 +684,7 @@ async function step3FillCredentials(payload) {
     await pauseForInteraction('beforePrimaryClick');
     utils.clickElement(continueButton);
     utils.log('步骤 3：邮箱已提交，正在等待密码输入框...');
-    await pauseForInteraction('afterPrimarySubmit');
+    await pauseForInteraction('afterIdentifierSubmit');
   }
 
   const loginFlowResult = await detectExistingAccountLoginFlow(payload);
@@ -693,6 +730,16 @@ async function resumePendingSignupStep() {
     if (isSignupPasswordCreationPageReady() && passwordErrorText) {
       await clearPendingSignupStep();
       utils.reportError(3, `步骤 3：注册密码不符合页面规则，请检查默认登录密码设置。详情：${passwordErrorText}`);
+      return;
+    }
+    if (helpers.shouldSwitchToLoginFlowAfterGrace?.({
+      url: location.href,
+      text: getPageTextSnapshot(),
+      hasLoginAction: Boolean(findLoginAction()),
+      loginFlowSeenAt: pending.startedAt || 0,
+      now: Date.now(),
+    })) {
+      await switchStep3ToLoginFlow(pending.payload, 'grace_timeout');
       return;
     }
     if (!isSignupPasswordCreationPageReady()) {

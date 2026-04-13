@@ -1,5 +1,179 @@
 # HANDOFF
 
+## 2026-04-14 Step 3 宽限后稳定登录密码页直接切 Step 6（以下内容补充最新状态）
+
+- 补充时间：2026-04-14
+- 触发背景：
+  - 用户真实联调日志确认：
+    - Step 3 邮箱提交后会进入宽限观察
+    - 但宽限结束后，页面仍稳定落在登录密码页
+    - 这种场景不应继续反复重试 `Sign up`
+  - 用户明确要求：
+    - 若宽限后仍稳定落到登录密码页，则按“已有账号”处理，自动切到第 6 步
+
+### 本次确认的根因
+
+- 上一轮修复虽然解决了“过快重试”
+- 但宽限后的处理仍然是：
+  - 继续尝试重试注册入口
+- 对于已被 OpenAI 识别为已有账号的邮箱，这条路径会造成：
+  - Step 3 反复填邮箱
+  - 最后背景层等待 45 秒超时
+
+### 本次修复
+
+- `shared/oauth-step-helpers-core.js`
+  - 将上一轮的宽限 helper 收口为：
+    - `shouldSwitchToLoginFlowAfterGrace({ url, text, hasLoginAction, loginFlowSeenAt, now, graceMs })`
+  - 规则：
+    - 若已有明确 `account exists / already in use` 信号，仍按已有账号处理
+    - 即使没有显式报错，只要 login flow 持续超过宽限窗口，也按已有账号处理
+
+- `shared/oauth-step-helpers-runtime.js`
+  - 同步新增 runtime helper，供 content script 使用
+
+- `content/signup-page.js`
+  - `recoverSignupFlowFromLoginPage()` 不再在宽限后重试点击 `Sign up`
+  - 现在会返回：
+    - `recovered`
+    - `switch_to_login`
+    - `waiting`
+  - 一旦命中 `switch_to_login`：
+    - `finishStep3OnPasswordPage()` 直接 `switchStep3ToLoginFlow(...)`
+    - Step 3 立刻完成并携带 `switchToLoginFlow: true`
+  - `resumePendingSignupStep()` 也同步支持：
+    - 页面刷新后若仍稳定停留在 login flow 超过宽限时间
+    - 直接切登录流程，不再等背景层超时
+
+### 修复后的预期行为
+
+- Step 3 邮箱提交后，如果只是临时 login flow：
+  - 仍先观察宽限窗口
+
+- Step 3 邮箱提交后，如果宽限结束仍稳定在登录密码页：
+  - 日志应出现：
+    - `步骤 3：宽限后仍稳定停留在登录密码页，按已有账号切换到登录流程。`
+  - 然后自动进入：
+    - `步骤 6：正在刷新 OAuth 页面并执行登录...`
+
+### fresh 验证证据
+
+```bash
+node --test tests/oauth-step-helpers.test.js tests/auto-flow.test.js
+npm test
+node --check content/signup-page.js
+node --check shared/oauth-step-helpers-core.js
+node --check shared/oauth-step-helpers-runtime.js
+```
+
+结果：
+
+- 新增的“宽限后稳定 login flow 直接视为已有账号”测试通过
+- 定向自动流程回归通过
+- 全量 `144/144` 测试通过
+- 相关文件语法检查通过
+
+### 下一轮真实联调观察点
+
+- 对类似 `amyreed5180@hotmail.com` 这类样本：
+  - 不应再出现多次：
+    - `步骤 3：当前停留在登录页，正在重新点击注册入口`
+  - 应改为：
+    - 先等待宽限
+    - 然后直接切到 Step 6
+
+## 2026-04-13 Step 3 登录页中转过早重试补充（以下内容补充最新状态）
+
+- 补充时间：2026-04-13
+- 触发背景：
+  - 用户真实联调中，某些邮箱在 Step 3 会出现：
+    - 能填写邮箱
+    - 提交后反复看到“当前停留在登录页，正在重新点击注册入口”
+    - 始终填不到密码
+  - 同时用户反馈：
+    - 操作节奏偏快
+
+### 本次确认的根因
+
+- `content/signup-page.js`
+  - 邮箱提交后，当前逻辑会很快进入“登录页恢复”分支
+  - 一旦页面短暂出现 login password / login flow 迹象
+  - 就会较快执行 `recoverSignupFlowFromLoginPage()`
+  - 真实联调里 OAuth 页面切换可能明显更慢，甚至十秒以上才完成真正跳页
+  - 结果：
+    - 脚本在页面还没稳定前就反复重点 `Sign up`
+    - 把原本还在进行中的跳转打断
+    - 最终表现为：
+      - 只能反复填邮箱
+      - 一直进不到真正的注册密码页
+
+### 本次修复
+
+- `shared/oauth-step-helpers-core.js`
+  - `getInteractionPacingProfile()` 新增：
+    - `afterIdentifierSubmit: [2600, 4200]`
+  - 新增：
+    - `shouldRetrySignupFromLoginFlow({ url, text, hasLoginAction, loginFlowSeenAt, now, graceMs })`
+  - 规则：
+    - 仅当页面持续停留在 login flow 超过宽限窗口
+    - 且没有明确 `account exists / already in use` 信号
+    - 才允许重试点击注册入口
+
+- `shared/oauth-step-helpers-runtime.js`
+  - 同步新增上述 runtime helper 与节奏配置，供 content script 使用
+
+- `content/signup-page.js`
+  - Step 3 邮箱提交后不再使用通用 `afterPrimarySubmit`
+  - 改为更慢的：
+    - `afterIdentifierSubmit`
+  - `recoverSignupFlowFromLoginPage()` 现在新增：
+    - 登录页迹象宽限观察
+    - 宽限期间只等待页面继续跳转，不立即重试
+    - 超过宽限窗口后才允许重新点击 `Sign up`
+  - 同时补日志：
+    - `步骤 3：检测到登录页迹象，先等待页面继续跳转，不立即重试注册入口...`
+
+### 修复后的预期行为
+
+- 邮箱提交后：
+  - Step 3 会比之前更慢、更像人工节奏
+  - 即使短暂看到 login flow，也会先给页面稳定时间
+  - 不会在 1 到 2 秒内就连续反复重跑“填邮箱 -> 点继续”
+
+- 只有在页面稳定卡在 login flow 一段时间后：
+  - 才会尝试重新点击注册入口
+
+### fresh 验证证据
+
+```bash
+node --test tests/oauth-step-helpers.test.js tests/auto-flow.test.js
+npm test
+node --check content/signup-page.js
+node --check shared/oauth-step-helpers-core.js
+node --check shared/oauth-step-helpers-runtime.js
+```
+
+结果：
+
+- 新增的“登录页宽限后再重试”测试通过
+- 定向自动流程回归通过
+- 全量 `144/144` 测试通过
+- 相关文件语法检查通过
+
+### 下一轮真实联调观察点
+
+- Step 3 邮箱提交后：
+  - 应先看到：
+    - `步骤 3：邮箱已提交，正在等待密码输入框...`
+  - 若短暂出现 login flow：
+    - 应先看到：
+      - `步骤 3：检测到登录页迹象，先等待页面继续跳转，不立即重试注册入口...`
+    - 不应立刻连续出现多次“重新点击注册入口”
+
+- 如果最终仍稳定停留在 login flow：
+  - 才应出现：
+    - `步骤 3：当前停留在登录页，正在重新点击注册入口（第 N 次）...`
+
 ## 2026-04-13 Step 2 跨 host 恢复失效与 Step 9 runtime 注入修复（以下内容补充最新状态）
 
 - 补充时间：2026-04-13

@@ -56,6 +56,7 @@ test('getInteractionPacingProfile provides slower human-like pauses for key tran
 
   assert.deepEqual(profile, {
     afterTyping: [450, 900],
+    afterIdentifierSubmit: [2600, 4200],
     beforePrimaryClick: [350, 700],
     afterPrimarySubmit: [1400, 2200],
     betweenProfileFields: [250, 600],
@@ -187,6 +188,44 @@ test('shouldTreatLoginFlowAsExistingAccount requires an explicit account-exists 
       hasLoginAction: true,
     }),
     true
+  );
+});
+
+test('shouldSwitchToLoginFlowAfterGrace treats stable login flow as existing account after grace window', () => {
+  assert.equal(
+    oauthStepHelpersModule.shouldSwitchToLoginFlowAfterGrace?.({
+      url: 'https://auth.openai.com/u/login/password?state=1',
+      text: 'Enter your password Forgot password',
+      hasLoginAction: true,
+      loginFlowSeenAt: 1000,
+      now: 5000,
+      graceMs: 10000,
+    }),
+    false
+  );
+
+  assert.equal(
+    oauthStepHelpersModule.shouldSwitchToLoginFlowAfterGrace?.({
+      url: 'https://auth.openai.com/u/login/password?state=1',
+      text: 'Enter your password Forgot password',
+      hasLoginAction: true,
+      loginFlowSeenAt: 1000,
+      now: 12050,
+      graceMs: 10000,
+    }),
+    true
+  );
+
+  assert.equal(
+    oauthStepHelpersModule.shouldSwitchToLoginFlowAfterGrace?.({
+      url: 'https://auth.openai.com/u/login/password?state=1',
+      text: 'Account associated with this email address already exists Enter your password',
+      hasLoginAction: true,
+      loginFlowSeenAt: 1000,
+      now: 12050,
+      graceMs: 10000,
+    }),
+    false
   );
 });
 

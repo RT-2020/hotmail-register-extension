@@ -126,6 +126,7 @@
   function getInteractionPacingProfile() {
     return {
       afterTyping: [450, 900],
+      afterIdentifierSubmit: [2600, 4200],
       beforePrimaryClick: [350, 700],
       afterPrimarySubmit: [1400, 2200],
       betweenProfileFields: [250, 600],
@@ -187,6 +188,40 @@
       || isLoginFlowUrl(url)
       || isLoginPasswordPageText(normalized)
     );
+  }
+
+  function shouldSwitchToLoginFlowAfterGrace({
+    url = '',
+    text = '',
+    hasLoginAction = false,
+    loginFlowSeenAt = 0,
+    now = 0,
+    graceMs = 12000,
+  } = {}) {
+    const normalized = normalizeInlineText(text);
+    const hasLoginSignals = Boolean(
+      hasLoginAction
+      || isLoginFlowUrl(url)
+      || isLoginPasswordPageText(normalized)
+    );
+
+    if (!hasLoginSignals) {
+      return false;
+    }
+
+    if (shouldTreatLoginFlowAsExistingAccount({
+      url,
+      text: normalized,
+      hasLoginAction,
+    })) {
+      return false;
+    }
+
+    if (!loginFlowSeenAt) {
+      return false;
+    }
+
+    return (Math.max(0, Number(now) || 0) - loginFlowSeenAt) >= Math.max(1000, Number(graceMs) || 0);
   }
 
   function describeStep3LoginFlowState({ url = '', text = '', hasLoginAction = false } = {}) {
@@ -282,6 +317,7 @@
     describeStep3LoginFlowState,
     shouldTreatPasswordPageAsSignup,
     shouldTreatLoginFlowAsExistingAccount,
+    shouldSwitchToLoginFlowAfterGrace,
     shouldUseStep8ContinueButton,
   };
 
